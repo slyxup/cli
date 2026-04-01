@@ -60,7 +60,7 @@ export class Downloader {
         );
       }
 
-      const buffer = await response.buffer();
+      const buffer = Buffer.from(await response.arrayBuffer());
       await fs.writeFile(targetPath, buffer);
 
       logger.info('File downloaded', { size: buffer.length, path: targetPath });
