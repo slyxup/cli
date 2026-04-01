@@ -1,4 +1,4 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { MetadataManager } from '../core/metadata';
 import { ValidationError } from '../types/errors';
 import fs from 'fs/promises';
