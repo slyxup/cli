@@ -2,12 +2,13 @@ import fetch from 'node-fetch';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { Registry, RegistrySchema } from '../types/schemas.js';
+import { Registry, RegistrySchema, RegistryTemplate, RegistryFeature } from '../types/schemas.js';
 import { RegistryError, ValidationError } from '../types/errors.js';
 import { logger } from '../utils/logger.js';
 import { ensureDir, pathExists, safeReadJSON, safeWriteJSON } from '../utils/file.js';
 
-const REGISTRY_URL = 'https://registry.slyxup.online/registry.json';
+const DEFAULT_REGISTRY_URL = 'https://registry.slyxup.online/registry.json';
+const REGISTRY_URL = process.env.SLYXUP_REGISTRY_URL || DEFAULT_REGISTRY_URL;
 const CACHE_DIR = path.join(os.homedir(), '.slyxup', 'cache');
 const REGISTRY_CACHE_FILE = path.join(CACHE_DIR, 'registry.json');
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour
@@ -126,27 +127,26 @@ export class RegistryLoader {
     }
   }
 
-  getTemplate(framework: string, version?: string) {
+  getTemplate(identifier: string, version?: string) {
     if (!this.registry) {
       throw new RegistryError('Registry not loaded');
     }
 
-    const templates = this.registry.templates[framework];
-    if (!templates || templates.length === 0) {
-      throw new RegistryError(`No templates found for framework: ${framework}`);
+    const { frameworkKey, templates } = this.resolveTemplateCollection(identifier);
+    if (templates.length === 0) {
+      throw new RegistryError(`No templates found for ${identifier}`);
     }
 
     if (version) {
       const template = templates.find((t) => t.version === version);
       if (!template) {
         throw new RegistryError(
-          `Template version ${version} not found for framework: ${framework}`
+          `Template version ${version} not found for ${frameworkKey}`
         );
       }
       return template;
     }
 
-    // Return latest version (first in array)
     return templates[0];
   }
 
@@ -172,20 +172,85 @@ export class RegistryLoader {
     return features[0];
   }
 
-  listTemplates(): string[] {
+  listTemplates(): RegistryTemplate[] {
     if (!this.registry) {
       throw new RegistryError('Registry not loaded');
     }
 
-    return Object.keys(this.registry.templates);
+    return Object.values(this.registry.templates).map((templates) => templates[0]);
   }
 
-  listFeatures(): string[] {
+  listFeatures(): RegistryFeature[] {
     if (!this.registry) {
       throw new RegistryError('Registry not loaded');
     }
 
-    return Object.keys(this.registry.features);
+    return Object.values(this.registry.features).map((features) => features[0]);
+  }
+
+  private normalizeIdentifier(value: string): string {
+    return value.trim().toLowerCase();
+  }
+
+  private matchesTemplate(
+    template: RegistryTemplate,
+    identifier: string,
+    frameworkKey: string
+  ): boolean {
+    const normalizedId = this.normalizeIdentifier(identifier);
+    const normalizedFramework = this.normalizeIdentifier(frameworkKey);
+
+    if (this.normalizeIdentifier(template.name) === normalizedId) {
+      return true;
+    }
+
+    if (normalizedFramework === normalizedId) {
+      return true;
+    }
+
+    if (template.aliases) {
+      const hasAlias = template.aliases.some(
+        (alias) => this.normalizeIdentifier(alias) === normalizedId
+      );
+      if (hasAlias) {
+        return true;
+      }
+    }
+
+    if (template.tags) {
+      const hasTag = template.tags.some(
+        (tag) => this.normalizeIdentifier(tag) === normalizedId
+      );
+      if (hasTag) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private resolveTemplateCollection(identifier: string) {
+    const normalizedId = this.normalizeIdentifier(identifier);
+    const registry = this.registry;
+
+    if (!registry) {
+      throw new RegistryError('Registry not loaded');
+    }
+
+    const directCollection = registry.templates[normalizedId];
+    if (directCollection && directCollection.length > 0) {
+      return { frameworkKey: normalizedId, templates: directCollection };
+    }
+
+    for (const [frameworkKey, templates] of Object.entries(registry.templates)) {
+      for (const template of templates) {
+        if (this.matchesTemplate(template, identifier, frameworkKey)) {
+          return { frameworkKey, templates };
+        }
+      }
+    }
+
+    throw new RegistryError(`Template not found: ${identifier}`);
   }
 
   async clearCache(): Promise<void> {

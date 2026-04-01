@@ -9,6 +9,9 @@ export const RegistryTemplateSchema = z.object({
   downloadUrl: z.string().url(),
   sha256: z.string().length(64),
   size: z.number().optional(),
+  aliases: z.array(z.string()).optional(), // e.g., ["react-app", "vite-react"]
+  tags: z.array(z.string()).optional(),
+  category: z.string().optional(),
 });
 
 export const RegistryFeatureSchema = z.object({
@@ -20,6 +23,9 @@ export const RegistryFeatureSchema = z.object({
   sha256: z.string().length(64),
   dependencies: z.array(z.string()).optional(),
   peerDependencies: z.array(z.string()).optional(),
+  aliases: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+  category: z.string().optional(),
 });
 
 export const RegistrySchema = z.object({

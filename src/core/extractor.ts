@@ -1,4 +1,4 @@
-import tar from 'tar';
+import { extract } from 'tar';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -57,7 +57,7 @@ export class SecureExtractor {
 
   private async extractArchive(archivePath: string, extractDir: string): Promise<void> {
     try {
-      await tar.extract({
+    await extract({
         file: archivePath,
         cwd: extractDir,
         strict: true,

@@ -18,7 +18,12 @@ export function createListCommand(): Command {
 
         console.log(chalk.cyan('Available templates:'));
         templates.forEach((template) => {
-          console.log(chalk.gray(`  • ${template}`));
+          const aliasText = template.aliases?.length
+            ? ` (aliases: ${template.aliases.join(', ')})`
+            : '';
+          console.log(
+            chalk.gray(`  • ${template.name}${aliasText} — ${template.description}`)
+          );
         });
       } catch (error) {
         logger.error('List templates failed', error);
@@ -37,7 +42,12 @@ export function createListCommand(): Command {
 
         console.log(chalk.cyan('Available features:'));
         features.forEach((feature) => {
-          console.log(chalk.gray(`  • ${feature}`));
+          const aliasText = feature.aliases?.length
+            ? ` (aliases: ${feature.aliases.join(', ')})`
+            : '';
+          console.log(
+            chalk.gray(`  • ${feature.name}${aliasText} — ${feature.description}`)
+          );
         });
       } catch (error) {
         logger.error('List features failed', error);
