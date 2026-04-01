@@ -8,13 +8,13 @@ export function createInitCommand(): Command {
 
   command
     .description('Initialize a new project from a template')
-    .argument('<framework>', 'Framework to use (e.g., react, vue, nextjs)')
     .argument('<project-name>', 'Name of the project')
+    .option('-t, --template <template>', 'Template to use (e.g., react, vue, nextjs)', 'react')
     .option('-v, --version <version>', 'Specific template version')
-    .action(async (framework: string, projectName: string, options: { version?: string }) => {
+    .action(async (projectName: string, options: { template?: string; version?: string }) => {
       try {
         await templateInstaller.install({
-          framework,
+          framework: options.template || 'react',
           projectName,
           version: options.version,
         });

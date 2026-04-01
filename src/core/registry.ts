@@ -7,7 +7,7 @@ import { RegistryError, ValidationError } from '../types/errors.js';
 import { logger } from '../utils/logger.js';
 import { ensureDir, pathExists, safeReadJSON, safeWriteJSON } from '../utils/file.js';
 
-const DEFAULT_REGISTRY_URL = 'https://registry.slyxup.online/registry.json';
+const DEFAULT_REGISTRY_URL = 'https://slyxup-registry.pages.dev/registry.json';
 const REGISTRY_URL = process.env.SLYXUP_REGISTRY_URL || DEFAULT_REGISTRY_URL;
 const CACHE_DIR = path.join(os.homedir(), '.slyxup', 'cache');
 const REGISTRY_CACHE_FILE = path.join(CACHE_DIR, 'registry.json');

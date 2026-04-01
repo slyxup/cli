@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 // Registry Schema
+// Registry Schema
 export const RegistryTemplateSchema = z.object({
   name: z.string(),
   version: z.string(),
@@ -12,6 +13,7 @@ export const RegistryTemplateSchema = z.object({
   aliases: z.array(z.string()).optional(), // e.g., ["react-app", "vite-react"]
   tags: z.array(z.string()).optional(),
   category: z.string().optional(),
+  features: z.array(z.string()).optional(), // Default features to install
 });
 
 export const RegistryFeatureSchema = z.object({

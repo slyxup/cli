@@ -6,6 +6,7 @@ import { downloader } from './downloader.js';
 import { extractor } from './extractor.js';
 import { MetadataManager } from './metadata.js';
 import { transactionManager } from './transaction.js';
+import { FeatureInstaller } from './feature-installer.js';
 import { logger } from '../utils/logger.js';
 import { ensureDir, pathExists } from '../utils/file.js';
 import { InstallationError } from '../types/errors.js';
@@ -74,6 +75,17 @@ export class TemplateInstaller {
       const metadataManager = new MetadataManager(projectDir);
       await metadataManager.initialize(framework, template.version);
       spinner.succeed(chalk.green('✓ Project metadata initialized'));
+
+      // Install default features if specified
+      if (template.features && template.features.length > 0) {
+        const featureInstaller = new FeatureInstaller();
+        for (const featureName of template.features) {
+          spinner.start(`Installing feature: ${featureName}...`);
+          await featureInstaller.install({ featureName, skipNpmInstall: true });
+          await metadataManager.addFeature(featureName);
+          spinner.succeed(chalk.green(`✓ Feature installed: ${featureName}`));
+        }
+      }
 
       // Commit transaction
       await transactionManager.commitTransaction(transactionId);
