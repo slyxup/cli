@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import chalk from 'chalk';
 import { FileSystemError } from '../types/errors.js';
 import { logger } from '../utils/logger.js';
 import { verifySHA256 } from '../utils/hash.js';
@@ -15,6 +16,9 @@ export interface DownloadOptions {
   sha256: string;
   filename?: string;
   useCache?: boolean;
+  verbose?: boolean;
+  onCacheHit?: () => void;
+  onCacheMiss?: () => void;
 }
 
 export class Downloader {
@@ -25,9 +29,16 @@ export class Downloader {
   }
 
   async download(options: DownloadOptions): Promise<string> {
-    const { url, sha256, filename, useCache = true } = options;
+    const { url, sha256, filename, useCache = true, verbose, onCacheHit, onCacheMiss } = options;
 
     await ensureDir(this.downloadDir);
+
+    // Check if this is a local file path (for testing)
+    const isLocalFile = url.startsWith('file://') || url.startsWith('/');
+    
+    if (isLocalFile) {
+      return this.handleLocalFile(url, sha256, verbose);
+    }
 
     const targetFilename = filename || this.getFilenameFromUrl(url);
     const targetPath = path.join(this.downloadDir, targetFilename);
@@ -35,10 +46,18 @@ export class Downloader {
     // Check cache
     if (useCache && (await this.isCacheValid(targetPath, sha256))) {
       logger.info('Using cached file', { path: targetPath });
+      if (verbose) {
+        console.log(chalk.gray(`  Using cached ${targetFilename}`));
+      }
+      onCacheHit?.();
       return targetPath;
     }
 
     // Download file
+    if (verbose) {
+      console.log(chalk.gray(`  Downloading ${targetFilename}...`));
+    }
+    onCacheMiss?.();
     logger.info('Downloading file', { url, target: targetPath });
 
     try {
@@ -77,6 +96,28 @@ export class Downloader {
 
       throw new FileSystemError('Failed to download file', error);
     }
+  }
+
+  /**
+   * Handle local file paths for testing
+   */
+  private async handleLocalFile(url: string, sha256: string, verbose?: boolean): Promise<string> {
+    const localPath = url.startsWith('file://') ? url.replace('file://', '') : url;
+    
+    if (verbose) {
+      console.log(chalk.gray(`  Using local file: ${localPath}`));
+    }
+    
+    // Verify the local file exists
+    if (!(await pathExists(localPath))) {
+      throw new FileSystemError(`Local file not found: ${localPath}`);
+    }
+    
+    // Verify integrity
+    await verifySHA256(localPath, sha256);
+    
+    logger.info('Using local file', { path: localPath });
+    return localPath;
   }
 
   private async isCacheValid(filePath: string, expectedHash: string): Promise<boolean> {

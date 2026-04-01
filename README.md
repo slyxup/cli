@@ -202,7 +202,7 @@ SlyxUp uses a remote registry at `https://registry.slyxup.online/registry.json` 
         "version": "1.0.0",
         "description": "React starter template",
         "framework": "react",
-        "downloadUrl": "https://cdn.slyxup.online/templates/react-1.0.0.tar.gz",
+        "downloadUrl": "https://cdn.slyxup.online/templates/react.tar.gz",
         "sha256": "abc123..."
       }
     ]
@@ -214,7 +214,7 @@ SlyxUp uses a remote registry at `https://registry.slyxup.online/registry.json` 
         "version": "3.4.0",
         "description": "Tailwind CSS integration",
         "frameworks": ["react", "vue", "nextjs"],
-        "downloadUrl": "https://cdn.slyxup.online/features/tailwind-3.4.0.tar.gz",
+        "downloadUrl": "https://cdn.slyxup.online/features/tailwind.tar.gz",
         "sha256": "def456..."
       }
     ]

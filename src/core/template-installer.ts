@@ -15,14 +15,14 @@ export interface TemplateInstallOptions {
   framework: string;
   projectName: string;
   version?: string;
+  verbose?: boolean;
 }
 
 export class TemplateInstaller {
   async install(options: TemplateInstallOptions): Promise<void> {
-    const { framework, projectName, version } = options;
+    const { framework, projectName, version, verbose } = options;
     const projectDir = path.resolve(process.cwd(), projectName);
 
-    // Check if directory already exists
     if (await pathExists(projectDir)) {
       throw new InstallationError(`Directory already exists: ${projectName}`);
     }
@@ -31,84 +31,99 @@ export class TemplateInstaller {
     const transactionId = `template-${Date.now()}`;
     const transaction = transactionManager.createTransaction(transactionId);
 
+    let fromCache = false;
+
     try {
-      // Load registry
       spinner.text = 'Loading registry...';
       await registryLoader.load();
       spinner.succeed(chalk.green('✓ Registry loaded'));
 
-      // Get template
       spinner.start('Resolving template...');
       const template = registryLoader.getTemplate(framework, version);
+      const displayVersion = template.frameworkVersion || template.version;
       logger.info('Template resolved', { framework, version: template.version });
       spinner.succeed(
-        chalk.green(`✓ Template resolved: ${framework}@${template.version}`)
+        chalk.green(`✓ Template resolved: ${framework} (${displayVersion})`)
       );
 
-      // Download template
+      if (verbose) {
+        console.log(chalk.gray(`  Source: ${template.downloadUrl}`));
+        if (template.description) {
+          console.log(chalk.gray(`  Description: ${template.description}`));
+        }
+      }
+
       spinner.start('Downloading template...');
       const archivePath = await downloader.download({
         url: template.downloadUrl,
         sha256: template.sha256,
-        filename: `${framework}-${template.version}.tar.gz`,
+        filename: `${framework}.tar.gz`,
+        verbose,
+        onCacheHit: () => { fromCache = true; },
       });
-      spinner.succeed(chalk.green('✓ Template downloaded'));
 
-      // Verify integrity
+      if (fromCache) {
+        spinner.succeed(chalk.green('✓ Template ready (from cache)'));
+      } else {
+        spinner.succeed(chalk.green('✓ Template downloaded'));
+      }
+
       spinner.start('Verifying integrity...');
-      // Already verified in downloader
       spinner.succeed(chalk.green('✓ Integrity verified'));
 
-      // Create project directory
       spinner.start('Creating project directory...');
       await ensureDir(projectDir);
       transaction.recordCreateDir(projectDir);
       spinner.succeed(chalk.green('✓ Project directory created'));
 
-      // Extract template
       spinner.start('Extracting template...');
-      await extractor.extract(archivePath, projectDir);
+      const extractedFiles = await extractor.extract(archivePath, projectDir);
       spinner.succeed(chalk.green('✓ Template extracted'));
 
-      // Initialize metadata
+      if (verbose && extractedFiles.length > 0) {
+        console.log(chalk.gray(`  Created ${extractedFiles.length} file(s)`));
+      }
+
       spinner.start('Initializing project metadata...');
       const metadataManager = new MetadataManager(projectDir);
       await metadataManager.initialize(framework, template.version);
       spinner.succeed(chalk.green('✓ Project metadata initialized'));
 
-      // Install default features if specified
       if (template.features && template.features.length > 0) {
         const featureInstaller = new FeatureInstaller();
         for (const featureName of template.features) {
           spinner.start(`Installing feature: ${featureName}...`);
-          await featureInstaller.install({ featureName, skipNpmInstall: true });
+          await featureInstaller.install({ featureName, skipNpmInstall: true, verbose });
           await metadataManager.addFeature(featureName);
           spinner.succeed(chalk.green(`✓ Feature installed: ${featureName}`));
         }
       }
 
-      // Commit transaction
       await transactionManager.commitTransaction(transactionId);
       spinner.succeed(chalk.green('✓ Installation completed successfully'));
 
       console.log();
-      console.log(chalk.bold.green('Project created successfully!'));
+      console.log(chalk.bold.green('✓ Project created successfully!'));
+
+      if (verbose) {
+        console.log();
+        console.log(chalk.gray('  Project location: ') + chalk.white(projectDir));
+        console.log(chalk.gray('  Framework: ') + chalk.white(`${framework} (${displayVersion})`));
+      }
+
       console.log();
       console.log(chalk.cyan('Next steps:'));
       console.log(chalk.gray(`  cd ${projectName}`));
       console.log(chalk.gray('  npm install'));
       console.log(chalk.gray('  npm run dev'));
       console.log();
-      console.log(chalk.cyan('Add features:'));
-      console.log(chalk.gray('  slyxup add tailwind'));
-      console.log(chalk.gray('  slyxup add shadcn'));
-      console.log();
+      console.log(chalk.gray('Add features:'));
+      console.log(chalk.cyan('  slyxup add tailwind'));
 
       logger.info('Template installation completed', { framework, projectName });
     } catch (error) {
       spinner.fail(chalk.red('✗ Installation failed'));
 
-      // Rollback transaction
       try {
         await transactionManager.rollbackTransaction(transactionId);
         console.log(chalk.yellow('Changes rolled back successfully'));

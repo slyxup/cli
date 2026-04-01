@@ -6,7 +6,7 @@ export function trackPhase(spinner: Ora, text: string) {
   spinner.text = text;
   spinner.start(text);
 
-  return (completedText?: string) => {
+  return (completedText?: string): void => {
     const label = completedText ?? text;
     const duration = ((Date.now() - start) / 1000).toFixed(2);
     spinner.succeed(chalk.green(`✓ ${label} (${duration}s)`));

@@ -6,7 +6,7 @@ import { registryLoader } from './registry.js';
 import { downloader } from './downloader.js';
 import { extractor } from './extractor.js';
 import { MetadataManager, findProjectRoot } from './metadata.js';
-import { transactionManager } from './transaction.js';
+import { transactionManager, Transaction } from './transaction.js';
 import { logger } from '../utils/logger.js';
 import { pathExists, safeReadJSON, safeWriteJSON } from '../utils/file.js';
 import { mergeDependencies, mergeScripts } from '../utils/merge.js';
@@ -18,59 +18,84 @@ export interface FeatureInstallOptions {
   featureName: string;
   version?: string;
   skipNpmInstall?: boolean;
+  projectRoot?: string;
+  framework?: string;
+  verbose?: boolean;
 }
 
 export class FeatureInstaller {
   async install(options: FeatureInstallOptions): Promise<void> {
-    const { featureName, version, skipNpmInstall = false } = options;
+    const {
+      featureName,
+      version,
+      skipNpmInstall = false,
+      projectRoot: passedRoot,
+      framework: passedFramework,
+    } = options;
 
     const spinner = ora('Initializing feature installation...').start();
     const transactionId = `feature-${featureName}-${Date.now()}`;
     const transaction = transactionManager.createTransaction(transactionId);
 
     try {
-      // Find project root
       spinner.text = 'Locating project...';
-      const projectRoot = await findProjectRoot();
+      const projectRoot = passedRoot || (await findProjectRoot());
 
       if (!projectRoot) {
         throw new InstallationError(
-          'Not in a SlyxUp project directory. Run this command from within a project.'
+          'No project found. Make sure you are in a directory with package.json.'
         );
       }
 
       spinner.succeed(chalk.green('✓ Project located'));
 
-      // Load project metadata
-      spinner.start('Loading project metadata...');
+      spinner.start('Loading project info...');
       const metadataManager = new MetadataManager(projectRoot);
-      const metadata = await metadataManager.load();
-      spinner.succeed(chalk.green(`✓ Project metadata loaded (${metadata.framework})`));
+      let metadata = null;
+      let framework = passedFramework;
 
-      // Check if feature already installed
-      if (await metadataManager.hasFeature(featureName)) {
-        throw new InstallationError(`Feature already installed: ${featureName}`);
+      try {
+        metadata = await metadataManager.load();
+        framework = framework || metadata.framework;
+        spinner.succeed(chalk.green(`✓ Project metadata loaded (${framework})`));
+
+        if (await metadataManager.hasFeature(featureName)) {
+          throw new InstallationError(`Feature already installed: ${featureName}`);
+        }
+      } catch (error) {
+        if (error instanceof InstallationError) {
+          throw error;
+        }
+        if (!framework) {
+          throw new InstallationError(
+            'Could not determine project framework. Please run from a project directory or ensure framework detection works.'
+          );
+        }
+        spinner.succeed(chalk.green(`✓ Framework: ${framework}`));
       }
 
-      // Load registry
       spinner.start('Loading registry...');
       await registryLoader.load();
       spinner.succeed(chalk.green('✓ Registry loaded'));
 
-      // Get feature
       spinner.start('Resolving feature...');
       const feature = registryLoader.getFeature(featureName, version);
       logger.info('Feature resolved', { featureName, version: feature.version });
 
-      // Validate framework compatibility
-      if (!feature.frameworks.includes(metadata.framework)) {
+      if (
+        !feature.frameworks.includes(framework) &&
+        !feature.frameworks.includes('*')
+      ) {
         throw new ValidationError(
-          `Feature ${featureName} is not compatible with ${metadata.framework}. ` +
+          `Feature ${featureName} is not compatible with ${framework}. ` +
             `Supported frameworks: ${feature.frameworks.join(', ')}`
         );
       }
 
-      spinner.succeed(chalk.green(`✓ Feature resolved: ${featureName}@${feature.version}`));
+      const displayVersion = feature.frameworkVersion || feature.version;
+      spinner.succeed(
+        chalk.green(`✓ Feature resolved: ${featureName} (${displayVersion})`)
+      );
       spinner.succeed(chalk.green('✓ Framework compatibility confirmed'));
 
       // Download feature
@@ -78,7 +103,7 @@ export class FeatureInstaller {
       const archivePath = await downloader.download({
         url: feature.downloadUrl,
         sha256: feature.sha256,
-        filename: `${featureName}-${feature.version}.tar.gz`,
+        filename: `${featureName}.tar.gz`,
       });
       spinner.succeed(chalk.green('✓ Feature downloaded'));
 
@@ -107,10 +132,12 @@ export class FeatureInstaller {
       // Apply file mutations
       await this.applyManifest(manifest, tempWorkspace, projectRoot, transaction);
 
-      // Update metadata
-      spinner.start('Updating project metadata...');
-      await metadataManager.addFeature(featureName);
-      spinner.succeed(chalk.green('✓ Metadata updated'));
+      // Update metadata (only for SlyxUp projects)
+      if (metadata) {
+        spinner.start('Updating project metadata...');
+        await metadataManager.addFeature(featureName);
+        spinner.succeed(chalk.green('✓ Metadata updated'));
+      }
 
       // Commit transaction
       await transactionManager.commitTransaction(transactionId);
@@ -151,7 +178,7 @@ export class FeatureInstaller {
     manifest: FeatureManifest,
     sourceDir: string,
     targetDir: string,
-    transaction: any
+    transaction: Transaction
   ): Promise<void> {
     const spinner = ora();
 
@@ -215,7 +242,7 @@ export class FeatureInstaller {
   private async updatePackageJson(
     manifest: FeatureManifest,
     projectDir: string,
-    transaction: any
+    transaction: Transaction
   ): Promise<void> {
     const packageJsonPath = path.join(projectDir, 'package.json');
 
@@ -229,29 +256,26 @@ export class FeatureInstaller {
     // Backup package.json
     await transaction.backupFile(packageJsonPath);
 
-    const packageJson = await safeReadJSON<Record<string, any>>(packageJsonPath);
+    const packageJson = await safeReadJSON<Record<string, unknown>>(packageJsonPath);
 
     // Merge dependencies
     if (manifest.dependencies) {
-      packageJson.dependencies = mergeDependencies(
-        packageJson.dependencies || {},
-        manifest.dependencies
-      );
+      const existingDeps = (packageJson.dependencies as Record<string, string>) || {};
+      packageJson.dependencies = mergeDependencies(existingDeps, manifest.dependencies);
       spinner.text = 'Dependencies injected...';
     }
 
     // Merge devDependencies
     if (manifest.devDependencies) {
-      packageJson.devDependencies = mergeDependencies(
-        packageJson.devDependencies || {},
-        manifest.devDependencies
-      );
+      const existingDevDeps = (packageJson.devDependencies as Record<string, string>) || {};
+      packageJson.devDependencies = mergeDependencies(existingDevDeps, manifest.devDependencies);
       spinner.text = 'Dev dependencies injected...';
     }
 
     // Merge scripts
     if (manifest.scripts) {
-      packageJson.scripts = mergeScripts(packageJson.scripts || {}, manifest.scripts);
+      const existingScripts = (packageJson.scripts as Record<string, string>) || {};
+      packageJson.scripts = mergeScripts(existingScripts, manifest.scripts);
       spinner.text = 'Scripts updated...';
     }
 

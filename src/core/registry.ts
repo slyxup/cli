@@ -7,7 +7,7 @@ import { RegistryError, ValidationError } from '../types/errors.js';
 import { logger } from '../utils/logger.js';
 import { ensureDir, pathExists, safeReadJSON, safeWriteJSON } from '../utils/file.js';
 
-const DEFAULT_REGISTRY_URL = 'https://slyxup-registry.pages.dev/registry.json';
+const DEFAULT_REGISTRY_URL = 'https://registry.slyxup.online/registry.json';
 const REGISTRY_URL = process.env.SLYXUP_REGISTRY_URL || DEFAULT_REGISTRY_URL;
 const CACHE_DIR = path.join(os.homedir(), '.slyxup', 'cache');
 const REGISTRY_CACHE_FILE = path.join(CACHE_DIR, 'registry.json');
@@ -70,6 +70,13 @@ export class RegistryLoader {
 
   private async fetchRegistry(): Promise<Registry> {
     try {
+      // Check if REGISTRY_URL is a local file path
+      const isLocalFile = REGISTRY_URL.startsWith('file://') || REGISTRY_URL.startsWith('/');
+      
+      if (isLocalFile) {
+        return await this.fetchLocalRegistry(REGISTRY_URL);
+      }
+
       logger.info('Fetching registry from remote', { url: REGISTRY_URL });
 
       const controller = new AbortController();
@@ -110,6 +117,37 @@ export class RegistryLoader {
     }
   }
 
+  private async fetchLocalRegistry(filePath: string): Promise<Registry> {
+    try {
+      const localPath = filePath.startsWith('file://') ? filePath.replace('file://', '') : filePath;
+      
+      logger.info('Loading registry from local file', { path: localPath });
+      
+      if (!(await pathExists(localPath))) {
+        throw new RegistryError(`Local registry file not found: ${localPath}`);
+      }
+      
+      const data = await safeReadJSON(localPath);
+      const registry = RegistrySchema.parse(data);
+      
+      logger.info('Registry loaded from local file', {
+        version: registry.version,
+        templates: Object.keys(registry.templates).length,
+        features: Object.keys(registry.features).length,
+      });
+      
+      return registry;
+    } catch (error) {
+      if (error instanceof ValidationError || error instanceof RegistryError) {
+        throw error;
+      }
+      
+      // Log the actual error for debugging
+      logger.error('Failed to load local registry', error);
+      throw new RegistryError('Failed to load local registry', error);
+    }
+  }
+
   private async saveToCache(registry: Registry): Promise<void> {
     try {
       await ensureDir(CACHE_DIR);
@@ -127,7 +165,7 @@ export class RegistryLoader {
     }
   }
 
-  getTemplate(identifier: string, version?: string) {
+  getTemplate(identifier: string, version?: string): RegistryTemplate {
     if (!this.registry) {
       throw new RegistryError('Registry not loaded');
     }
@@ -150,7 +188,7 @@ export class RegistryLoader {
     return templates[0];
   }
 
-  getFeature(name: string, version?: string) {
+  getFeature(name: string, version?: string): RegistryFeature {
     if (!this.registry) {
       throw new RegistryError('Registry not loaded');
     }
@@ -186,6 +224,13 @@ export class RegistryLoader {
     }
 
     return Object.values(this.registry.features).map((features) => features[0]);
+  }
+
+  getRegistry(): Registry {
+    if (!this.registry) {
+      throw new RegistryError('Registry not loaded');
+    }
+    return this.registry;
   }
 
   private normalizeIdentifier(value: string): string {
@@ -229,7 +274,7 @@ export class RegistryLoader {
     return false;
   }
 
-  private resolveTemplateCollection(identifier: string) {
+  private resolveTemplateCollection(identifier: string): { frameworkKey: string; templates: RegistryTemplate[] } {
     const normalizedId = this.normalizeIdentifier(identifier);
     const registry = this.registry;
 
