@@ -2,10 +2,13 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { readdir } from 'fs/promises';
 import path from 'path';
+import * as ts from 'typescript';
 
 import { templateInstaller } from '../core/template-installer.js';
+import { FeatureInstaller } from '../core/feature-installer.js';
 import { registryLoader } from '../core/registry.js';
 import { logger } from '../utils/logger.js';
 
@@ -26,6 +29,194 @@ const TEMPLATE_ALIASES: Record<string, string> = {
   node: 'node',
   vue: 'vue',
 };
+
+/**
+ * Remove TypeScript configuration and dependencies from a project
+ * Converts all .ts/.tsx files to .js/.jsx
+ */
+async function removeTypeScriptFromProject(projectDir: string): Promise<void> {
+  const packageJsonPath = path.join(projectDir, 'package.json');
+  const tsconfigPath = path.join(projectDir, 'tsconfig.json');
+  const tsconfigNodePath = path.join(projectDir, 'tsconfig.node.json');
+  
+  // Remove tsconfig files
+  if (existsSync(tsconfigPath)) {
+    unlinkSync(tsconfigPath);
+  }
+  if (existsSync(tsconfigNodePath)) {
+    unlinkSync(tsconfigNodePath);
+  }
+  
+  // Convert all TypeScript files to JavaScript
+  await convertTsFilesToJs(projectDir);
+  
+  // Update package.json
+  if (existsSync(packageJsonPath)) {
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+    
+    // Remove TypeScript dependencies
+    const tsPackages = [
+      'typescript',
+      '@types/node',
+      '@types/react',
+      '@types/react-dom',
+      '@types/express',
+      '@types/cors',
+      '@types/fastify',
+      '@types/hono',
+      'tsx',
+      'ts-node'
+    ];
+    
+    if (packageJson.devDependencies) {
+      tsPackages.forEach(pkg => {
+        delete packageJson.devDependencies[pkg];
+      });
+    }
+    
+    // Update build scripts to remove TypeScript compilation
+    if (packageJson.scripts) {
+      // Replace "tsc && vite build" with just "vite build"
+      if (packageJson.scripts.build) {
+        packageJson.scripts.build = packageJson.scripts.build
+          .replace(/tsc\s*&&\s*/g, '')
+          .replace(/tsc\s*;?\s*/g, '')
+          .replace(/^tsc$/g, 'echo "No build step"');
+      }
+      
+      // Replace tsx with node
+      if (packageJson.scripts.dev) {
+        packageJson.scripts.dev = packageJson.scripts.dev
+          .replace(/tsx\s+watch\s+/g, 'node --watch ')
+          .replace(/tsx\s+/g, 'node ')
+          .replace(/\.ts\b/g, '.js');
+      }
+      
+      if (packageJson.scripts.start) {
+        packageJson.scripts.start = packageJson.scripts.start.replace(/\.ts\b/g, '.js');
+      }
+      
+      // Remove type-check script
+      delete packageJson.scripts['type-check'];
+    }
+    
+    writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n');
+  }
+  
+  // Update vite.config to use .js instead of .ts
+  const viteConfigTs = path.join(projectDir, 'vite.config.ts');
+  if (existsSync(viteConfigTs)) {
+    const viteConfigJs = path.join(projectDir, 'vite.config.js');
+    let content = readFileSync(viteConfigTs, 'utf-8');
+    try {
+      const result = ts.transpileModule(content, {
+        compilerOptions: {
+          target: ts.ScriptTarget.Latest,
+          module: ts.ModuleKind.ESNext,
+        },
+        fileName: viteConfigTs,
+      });
+      content = result.outputText;
+    } catch (e) {
+      content = removeTypeAnnotations(content);
+    }
+    writeFileSync(viteConfigJs, content);
+    unlinkSync(viteConfigTs);
+  }
+
+  const indexHtmlPath = path.join(projectDir, 'index.html');
+  if (existsSync(indexHtmlPath)) {
+    let content = readFileSync(indexHtmlPath, 'utf-8');
+    content = content.replace(/\.tsx/g, '.jsx').replace(/\.ts/g, '.js');
+    writeFileSync(indexHtmlPath, content);
+  }
+}
+
+/**
+ * Recursively convert all .ts/.tsx files to .js/.jsx
+ */
+async function convertTsFilesToJs(dir: string): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    
+    if (entry.isDirectory()) {
+      // Skip node_modules, .git, etc.
+      if (['node_modules', '.git', 'dist', 'build', '.next'].includes(entry.name)) {
+        continue;
+      }
+      await convertTsFilesToJs(fullPath);
+    } else if (entry.isFile()) {
+      if (entry.name.endsWith('.d.ts')) {
+        // Delete type definitions completely
+        unlinkSync(fullPath);
+      } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+        const newExt = entry.name.endsWith('.tsx') ? '.jsx' : '.js';
+        const newPath = fullPath.replace(/\.tsx?$/, newExt);
+        
+        // Read, convert, and write
+        let content = readFileSync(fullPath, 'utf-8');
+        try {
+          const result = ts.transpileModule(content, {
+            compilerOptions: {
+              target: ts.ScriptTarget.Latest,
+              module: ts.ModuleKind.ESNext,
+              jsx: ts.JsxEmit.Preserve,
+              removeComments: false,
+            },
+            fileName: fullPath,
+          });
+          content = result.outputText;
+        } catch (e) {
+          // Fallback
+          content = removeTypeAnnotations(content);
+        }
+        
+        // Fix any remaining .ts/.tsx extensions in imports or text
+        content = content.replace(/\.tsx/g, '.jsx').replace(/\.ts/g, '.js');
+        
+        writeFileSync(newPath, content);
+        unlinkSync(fullPath);
+      }
+    }
+  }
+}
+
+/**
+ * Remove TypeScript type annotations from code
+ */
+function removeTypeAnnotations(code: string): string {
+  // Remove type imports
+  code = code.replace(/import\s+type\s+\{[^}]+\}\s+from\s+['"][^'"]+['"]\s*;?\n?/g, '');
+  
+  // Remove interface declarations
+  code = code.replace(/interface\s+\w+\s*\{[^}]*\}\s*/g, '');
+  
+  // Remove type aliases
+  code = code.replace(/type\s+\w+\s*=\s*[^;]+;\s*/g, '');
+  
+  // Remove function parameter types: (param: Type) => (param)
+  code = code.replace(/\(\s*(\w+)\s*:\s*[^),]+\s*\)/g, '($1)');
+  
+  // Remove function return types: ): Type => =>
+  code = code.replace(/\)\s*:\s*[^{=>\n]+\s*=>/g, ') =>');
+  code = code.replace(/\)\s*:\s*[^{=>\n]+\s*\{/g, ') {');
+  
+  // Remove variable type annotations: const x: Type = => const x =
+  code = code.replace(/:\s*\w+(<[^>]+>)?(\[\])?(\s*=)/g, '$3');
+  
+  // Remove generic type parameters: <T, K> => <>
+  code = code.replace(/<[A-Z][^>]*>/g, '');
+  
+  // Remove 'as' type assertions
+  code = code.replace(/\s+as\s+\w+(<[^>]+>)?/g, '');
+  
+  // Remove JSX prop type annotations
+  code = code.replace(/(\w+)\s*:\s*[^,}]+([,}])/g, '$1$2');
+  
+  return code;
+}
 
 const STATUS_COLORS: Record<string, typeof chalk.green> = {
   'stable': chalk.green,
@@ -63,9 +254,30 @@ async function interactiveMode(_verbose = false) {
       type: 'input',
       name: 'projectName',
       message: 'What is your project name?',
+      default: '.',
       validate: (input) => {
         if (!input.trim()) return 'Project name cannot be empty';
-        if (existsSync(path.resolve(process.cwd(), input.trim()))) {
+        const trimmed = input.trim();
+        
+        // Allow "." for current directory
+        if (trimmed === '.') {
+          const currentDir = process.cwd();
+          const files = readdirSync(currentDir);
+          // Allow if directory is empty or only has hidden files/common files
+          const significantFiles = files.filter(f => 
+            !f.startsWith('.') && 
+            f !== 'node_modules' && 
+            f !== 'package-lock.json' &&
+            f !== 'yarn.lock' &&
+            f !== 'pnpm-lock.yaml'
+          );
+          if (significantFiles.length > 0 && !files.includes('package.json')) {
+            return 'Current directory is not empty. Use a different name or empty the directory.';
+          }
+          return true;
+        }
+        
+        if (existsSync(path.resolve(process.cwd(), trimmed))) {
           return 'Directory already exists';
         }
         return true;
@@ -73,21 +285,12 @@ async function interactiveMode(_verbose = false) {
     },
   ]);
 
-  const { useTs } = await inquirer.prompt([
+  const { useTypeScript } = await inquirer.prompt([
     {
       type: 'confirm',
-      name: 'useTs',
+      name: 'useTypeScript',
       message: 'Use TypeScript?',
       default: true,
-    },
-  ]);
-
-  const { installDeps } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'installDeps',
-      message: 'Install dependencies after creation?',
-      default: false,
     },
   ]);
 
@@ -104,9 +307,8 @@ async function interactiveMode(_verbose = false) {
     framework,
     projectName,
     options: {
-      ts: useTs,
-      install: installDeps,
       git: initializeGit,
+      ts: useTypeScript,
     },
   };
 }
@@ -116,12 +318,10 @@ export function createInitCommand(): Command {
 
   command
     .description('Create a new project from a template')
-    .argument('[template]', 'Template to use (react, next, node, vue)')
+    .argument('[template]', 'Template to use (react, next, vue, express, discord)')
     .argument('[project-name]', 'Project directory name')
-    .option('--ts', 'Use TypeScript (default)')
-    .option('--no-ts', 'Use JavaScript')
-    .option('--install', 'Run package install after creation')
-    .option('--no-install', 'Skip package installation')
+    .option('--ts', 'Include TypeScript configuration (default)')
+    .option('--no-ts', 'Skip TypeScript setup')
     .option('--git', 'Initialize git repository (default)')
     .option('--no-git', 'Skip git initialization')
     .option('--pm <manager>', 'Package manager (npm, yarn, pnpm, bun)', 'npm')
@@ -134,7 +334,9 @@ export function createInitCommand(): Command {
       `
 Examples:
   $ slyxup init react my-app
-  $ slyxup init                     ${chalk.gray('# Interactive mode')}
+  $ slyxup init react my-app --no-ts ${chalk.gray('# Without TypeScript')}
+  $ slyxup init react .              ${chalk.gray('# Initialize in current directory')}
+  $ slyxup init                      ${chalk.gray('# Interactive mode')}
   $ slyxup init next dashboard --pm pnpm
   $ slyxup init react my-app --dry-run
   $ slyxup init react my-app --verbose
@@ -148,16 +350,37 @@ Examples:
       ) => {
         try {
           await registryLoader.load();
+          
+          // Ensure options object exists
+          options = options || {};
+
+          // Track if we came from interactive mode
+          let fromInteractive = false;
 
           if (!template && !projectName) {
-            const result = await interactiveMode(options?.verbose);
+            const result = await interactiveMode(options.verbose);
             template = result.framework;
             projectName = result.projectName;
-            Object.assign(options || {}, result.options);
+            Object.assign(options, result.options);
+            fromInteractive = true;
           }
 
           const resolvedTemplate = TEMPLATE_ALIASES[template!] || template!;
           const finalProjectName = projectName || resolvedTemplate;
+          const isCurrentDir = finalProjectName === '.';
+
+          // If not from interactive mode and ts option not explicitly set, ask user
+          if (!fromInteractive && options.ts === undefined && !options.yes) {
+            const { useTypeScript } = await inquirer.prompt([
+              {
+                type: 'confirm',
+                name: 'useTypeScript',
+                message: 'Use TypeScript?',
+                default: true,
+              },
+            ]);
+            options.ts = useTypeScript;
+          }
 
           if (options?.verbose) {
             console.log(chalk.gray('\nVerbose mode enabled\n'));
@@ -170,12 +393,41 @@ Examples:
             process.exit(1);
           }
 
-          const targetDir = path.resolve(process.cwd(), finalProjectName);
+          const targetDir = isCurrentDir 
+            ? process.cwd() 
+            : path.resolve(process.cwd(), finalProjectName);
+          
+          const displayName = isCurrentDir 
+            ? path.basename(process.cwd()) 
+            : finalProjectName;
 
-          if (existsSync(targetDir)) {
+          // Check if directory exists (skip for current directory)
+          if (!isCurrentDir && existsSync(targetDir)) {
             console.error(chalk.red(`\n✗ Directory already exists: ${finalProjectName}`));
             console.error(chalk.gray('  Use a different project name or remove the existing directory.'));
             process.exit(1);
+          }
+
+          // For current directory, check if it's safe to initialize
+          if (isCurrentDir) {
+            const files = readdirSync(targetDir);
+            const hasPackageJson = files.includes('package.json');
+            
+            if (hasPackageJson) {
+              const { overwrite } = await inquirer.prompt([
+                {
+                  type: 'confirm',
+                  name: 'overwrite',
+                  message: chalk.yellow('package.json already exists. Overwrite with template?'),
+                  default: false,
+                },
+              ]);
+              
+              if (!overwrite) {
+                console.log(chalk.gray('\nAborted. Use `slyxup add` to add features to existing project.\n'));
+                return;
+              }
+            }
           }
 
           const templates = registryLoader.listTemplates();
@@ -197,12 +449,6 @@ Examples:
             });
             console.log();
             console.log(chalk.gray('Tip: Run without arguments for interactive mode'));
-            process.exit(1);
-          }
-
-          if (templateData.status === 'coming-soon') {
-            console.error(chalk.yellow(`\n⚠ Template '${template}' is not yet available.`));
-            console.log(chalk.gray('  Check back soon or try another template.'));
             process.exit(1);
           }
 
@@ -232,7 +478,8 @@ Examples:
           console.log();
           console.log(chalk.bold.cyan('🚀 Creating Project'));
           console.log();
-          console.log(chalk.cyan('  Project:   ') + chalk.white(finalProjectName));
+          console.log(chalk.cyan('  Project:   ') + chalk.white(displayName));
+          console.log(chalk.cyan('  Directory: ') + chalk.white(isCurrentDir ? '.' : finalProjectName));
           console.log(chalk.cyan('  Template:  ') + chalk.white(`${resolvedTemplate} (${version})`));
           console.log(chalk.cyan('  TypeScript:') + chalk.white(options?.ts !== false ? 'Yes' : 'No'));
           console.log();
@@ -255,10 +502,45 @@ Examples:
 
           await templateInstaller.install({
             framework: resolvedTemplate,
-            projectName: finalProjectName,
+            projectName: displayName,
+            targetDir: targetDir,
             version: options?.version,
             verbose: options?.verbose,
           });
+
+          // Handle TypeScript setup
+          if (options?.ts === false) {
+            // User explicitly wants no TypeScript - remove TS from template
+            console.log(chalk.gray('\nRemoving TypeScript configuration...'));
+            try {
+              await removeTypeScriptFromProject(targetDir);
+              console.log(chalk.green('✓ TypeScript removed'));
+            } catch (err) {
+              console.log(chalk.yellow('⚠ Could not remove TypeScript completely'));
+              if (options?.verbose && err instanceof Error) {
+                console.log(chalk.gray(`  ${err.message}`));
+              }
+            }
+          } else {
+            // User wants TypeScript (default) - ensure it's configured
+            console.log(chalk.gray('\nSetting up TypeScript...'));
+            try {
+              const featureInstaller = new FeatureInstaller();
+              await featureInstaller.install({
+                featureName: 'typescript',
+                projectRoot: targetDir,
+                skipNpmInstall: true, // We'll install all deps at once later
+                verbose: options?.verbose,
+              });
+              console.log(chalk.green('✓ TypeScript configured'));
+            } catch (tsError) {
+              // TypeScript setup is optional, don't fail the whole init
+              console.log(chalk.yellow('⚠ TypeScript setup skipped (may already be configured)'));
+              if (options?.verbose && tsError instanceof Error) {
+                console.log(chalk.gray(`  ${tsError.message}`));
+              }
+            }
+          }
 
           if (options?.git !== false) {
             try {
@@ -277,37 +559,48 @@ Examples:
             }
           }
 
-          if (options?.install) {
-            const pm = options.pm || 'npm';
-            console.log();
-            console.log(
-              chalk.cyan(`Installing dependencies with ${pm}...`)
-            );
+          console.log();
+          console.log(chalk.bold.green('✓ ') + chalk.bold(`Created ${displayName}`));
+          console.log();
+
+          const pm = options?.pm || 'npm';
+          let installNow = options?.yes ?? false;
+          
+          if (!options?.yes) {
+            const { installChoice } = await inquirer.prompt([
+              {
+                type: 'confirm',
+                name: 'installChoice',
+                message: `Install dependencies now with ${pm}?`,
+                default: true,
+              },
+            ]);
+            installNow = installChoice;
+          }
+
+          if (installNow) {
+            console.log(chalk.cyan(`\nInstalling dependencies with ${pm}...`));
             try {
               const installCmd = pm === 'yarn' ? 'yarn' : `${pm} install`;
               execSync(installCmd, { cwd: targetDir, stdio: 'inherit' });
               console.log(chalk.green('✓ Dependencies installed'));
             } catch {
-              console.log(
-                chalk.yellow(
-                  `⚠ Failed to install dependencies. Run manually: cd ${finalProjectName} && ${pm} install`
-                )
-              );
+              console.log(chalk.yellow(`⚠ Failed. Run manually: ${isCurrentDir ? '' : `cd ${finalProjectName} && `}${pm} install`));
             }
           }
 
           console.log();
-          console.log(chalk.bold.green('✓ ') + chalk.bold(`Created ${finalProjectName}`));
-          console.log();
           console.log('Next steps:');
-          console.log(chalk.gray(`  cd ${finalProjectName}`));
-          if (!options?.install) {
-            console.log(chalk.gray(`  ${options?.pm || 'npm'} install`));
+          if (!isCurrentDir) {
+            console.log(chalk.gray(`  cd ${finalProjectName}`));
           }
-          console.log(chalk.gray(`  ${options?.pm || 'npm'} run dev`));
+          if (!installNow) {
+            console.log(chalk.gray(`  ${pm} install`));
+          }
+          console.log(chalk.gray(`  ${pm} run dev`));
           console.log();
           console.log(chalk.gray('Add features with:'));
-          console.log(chalk.cyan('  slyxup add tailwind'));
+          console.log(chalk.cyan('  slyxup add <feature>'));
 
           logger.info('Init completed', {
             template: resolvedTemplate,

@@ -1,14 +1,38 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-.DS_Store
-*.log
-.env
-.env.local
-coverage/
-*.tsbuildinfo
+
+# IDE
 .vscode/
 .idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Temp files
 *.swp
 *.swo
 *~
 .tmp/
+.cache/
+
+# Lock files (optional - uncomment if you want to ignore)
+# package-lock.json

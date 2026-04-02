@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { logger } from '../utils/logger.js';
 
-export type Framework = 'react' | 'next' | 'vue' | 'nuxt' | 'svelte' | 'node' | 'unknown';
+export type Framework = 'react' | 'next' | 'vue' | 'nuxt' | 'svelte' | 'node' | 'express' | 'fastify' | 'nestjs' | 'graphql' | 'hono' | 'bun' | 'discord' | 'astro' | 'solid' | 'unknown';
 
 export interface ProjectInfo {
   framework: Framework;
@@ -33,6 +33,14 @@ const FRAMEWORK_SIGNATURES: Array<{
     check: (deps, devDeps) => deps.includes('nuxt') || devDeps.includes('nuxt'),
   },
   {
+    framework: 'astro',
+    check: (deps, devDeps) => deps.includes('astro') || devDeps.includes('astro'),
+  },
+  {
+    framework: 'solid',
+    check: (deps) => deps.includes('solid-js'),
+  },
+  {
     framework: 'svelte',
     check: (deps, devDeps) =>
       deps.includes('svelte') || devDeps.includes('svelte') || devDeps.includes('@sveltejs/kit'),
@@ -46,10 +54,37 @@ const FRAMEWORK_SIGNATURES: Array<{
     check: (deps) => deps.includes('react'),
   },
   {
+    framework: 'discord',
+    check: (deps) => deps.includes('discord.js'),
+  },
+  {
+    framework: 'nestjs',
+    check: (deps) => deps.includes('@nestjs/core'),
+  },
+  {
+    framework: 'fastify',
+    check: (deps) => deps.includes('fastify'),
+  },
+  {
+    framework: 'graphql',
+    check: (deps) => deps.includes('@apollo/server') || deps.includes('apollo-server'),
+  },
+  {
+    framework: 'hono',
+    check: (deps) => deps.includes('hono'),
+  },
+  {
+    framework: 'bun',
+    check: (_, devDeps, files) => 
+      devDeps.includes('bun-types') || files.includes('bunfig.toml'),
+  },
+  {
+    framework: 'express',
+    check: (deps) => deps.includes('express'),
+  },
+  {
     framework: 'node',
     check: (deps, _, files) =>
-      deps.includes('express') ||
-      deps.includes('fastify') ||
       deps.includes('koa') ||
       files.includes('server.js') ||
       files.includes('server.ts') ||

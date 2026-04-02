@@ -3,6 +3,8 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
 import { execSync } from 'child_process';
+import fs from 'fs/promises';
+import path from 'path';
 
 import { detectProject, initializeSlyxUpMetadata } from '../core/detector.js';
 import { featureInstaller } from '../core/feature-installer.js';
@@ -66,18 +68,70 @@ Examples:
     .action(async (features: string[], options?: AddOptions) => {
       try {
         const spinner = ora('Detecting project...').start();
-        const project = await detectProject();
+        let project = await detectProject();
 
         if (!project) {
-          spinner.fail(chalk.red('No project found'));
-          console.log();
-          console.log(chalk.yellow('⚠ Could not find a project in this directory.'));
-          console.log(chalk.gray('  Make sure you are in a directory with a package.json file.'));
-          console.log();
-          console.log(chalk.gray('To create a new project:'));
-          console.log(chalk.cyan('  slyxup init react my-app'));
-          console.log();
-          process.exit(1);
+          spinner.warn(chalk.yellow('No package.json found'));
+          
+          // Offer to initialize a new project
+          const { initProject } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'initProject',
+              message: 'No project found. Initialize a new package.json?',
+              default: true,
+            },
+          ]);
+
+          if (!initProject) {
+            console.log();
+            console.log(chalk.yellow('⚠ Cannot add features without a project.'));
+            console.log(chalk.gray('  Options:'));
+            console.log(chalk.cyan('    slyxup init react my-app  ') + chalk.gray('# Create new project'));
+            console.log(chalk.cyan('    npm init -y               ') + chalk.gray('# Initialize package.json'));
+            console.log();
+            process.exit(1);
+          }
+
+          // Ask for project name
+          const currentDirName = path.basename(process.cwd());
+          const { projectName } = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'projectName',
+              message: 'Project name:',
+              default: currentDirName,
+            },
+          ]);
+
+          // Create minimal package.json
+          const packageJson = {
+            name: projectName.toLowerCase().replace(/\s+/g, '-'),
+            version: '0.1.0',
+            description: '',
+            main: 'index.js',
+            scripts: {
+              test: 'echo "Error: no test specified" && exit 1',
+            },
+            keywords: [],
+            author: '',
+            license: 'ISC',
+          };
+
+          await fs.writeFile(
+            path.join(process.cwd(), 'package.json'),
+            JSON.stringify(packageJson, null, 2)
+          );
+
+          console.log(chalk.green('✓ Created package.json'));
+
+          // Re-detect project
+          project = await detectProject();
+          
+          if (!project) {
+            console.log(chalk.red('✗ Failed to initialize project'));
+            process.exit(1);
+          }
         }
 
         spinner.succeed(chalk.green(`Detected ${chalk.cyan(project.framework)} project`));
@@ -202,7 +256,59 @@ Examples:
           }
 
           try {
-            const feature = registryLoader.getFeature(featureName, options?.version);
+            let feature;
+            let resolvedName = featureName;
+            
+            try {
+              feature = registryLoader.getFeature(featureName, options?.version);
+            } catch {
+              // Feature not found - try fuzzy search
+              const fuzzyMatches = registryLoader.fuzzySearchFeature(featureName);
+              
+              if (fuzzyMatches.length > 0 && fuzzyMatches[0].score >= 0.6) {
+                const bestMatch = fuzzyMatches[0];
+                
+                // If it's a very close match (typo), auto-suggest
+                if (bestMatch.score >= 0.8) {
+                  console.log(chalk.yellow(`  ⚠ "${featureName}" not found.`));
+                  
+                  const { useMatch } = await inquirer.prompt([
+                    {
+                      type: 'confirm',
+                      name: 'useMatch',
+                      message: `Did you mean "${chalk.cyan(bestMatch.name)}"?`,
+                      default: true,
+                    },
+                  ]);
+                  
+                  if (useMatch) {
+                    feature = bestMatch.item;
+                    resolvedName = bestMatch.name;
+                  } else {
+                    const suggestions = registryLoader.getSuggestions(featureName, 'feature', 5);
+                    console.log(chalk.gray(`    Similar features: ${suggestions.join(', ')}`));
+                    continue;
+                  }
+                } else {
+                  // Show suggestions
+                  console.log(chalk.red(`  ✗ "${featureName}" not found in registry`));
+                  const suggestions = fuzzyMatches.slice(0, 5).map(m => m.name);
+                  console.log(chalk.gray(`    Did you mean: ${suggestions.join(', ')}?`));
+                  console.log(chalk.gray(`    Run 'slyxup list features' to see all features.`));
+                  continue;
+                }
+              } else {
+                console.log(chalk.red(`  ✗ "${featureName}" not found in registry`));
+                const suggestions = registryLoader.getSuggestions(featureName, 'feature', 3);
+                if (suggestions.length > 0) {
+                  console.log(chalk.gray(`    Similar: ${suggestions.join(', ')}`));
+                }
+                console.log(chalk.gray(`    Run 'slyxup list features' to see available features.`));
+                continue;
+              }
+            }
+
+            if (!feature) continue;
 
             if (
               !feature.frameworks.includes(project.framework) &&
@@ -210,7 +316,7 @@ Examples:
               project.framework !== 'unknown'
             ) {
               console.log(
-                chalk.red(`  ✗ ${featureName} is not compatible with ${project.framework}`)
+                chalk.red(`  ✗ ${resolvedName} is not compatible with ${project.framework}`)
               );
               console.log(chalk.gray(`    Supported: ${feature.frameworks.join(', ')}`));
               continue;
@@ -239,9 +345,11 @@ Examples:
                 console.log(chalk.gray(`      + ${dep}`));
               });
             }
-          } catch {
-            console.log(chalk.red(`  ✗ ${featureName} not found in registry`));
-            console.log(chalk.gray(`    Run 'slyxup list features' to see available features.`));
+          } catch (err) {
+            console.log(chalk.red(`  ✗ Error resolving ${featureName}`));
+            if (options?.verbose && err instanceof Error) {
+              console.log(chalk.gray(`    ${err.message}`));
+            }
           }
         }
 
@@ -382,14 +490,20 @@ Examples:
 
         if (!options?.skipInstall && successCount > 0) {
           console.log();
-          const { runInstall } = await inquirer.prompt([
-            {
-              type: 'confirm',
-              name: 'runInstall',
-              message: `Run ${project.packageManager} install to install dependencies?`,
-              default: true,
-            },
-          ]);
+          
+          let runInstall = options?.yes ?? false;
+          
+          if (!options?.yes) {
+            const response = await inquirer.prompt([
+              {
+                type: 'confirm',
+                name: 'runInstall',
+                message: `Run ${project.packageManager} install to install dependencies?`,
+                default: true,
+              },
+            ]);
+            runInstall = response.runInstall;
+          }
 
           if (runInstall) {
             console.log(chalk.gray(`\n  Running ${project.packageManager} install...`));

@@ -7,6 +7,53 @@ import { RegistryError, ValidationError } from '../types/errors.js';
 import { logger } from '../utils/logger.js';
 import { ensureDir, pathExists, safeReadJSON, safeWriteJSON } from '../utils/file.js';
 
+// Levenshtein distance for fuzzy matching
+function levenshteinDistance(a: string, b: string): number {
+  const matrix: number[][] = [];
+  const aLen = a.length;
+  const bLen = b.length;
+
+  if (aLen === 0) return bLen;
+  if (bLen === 0) return aLen;
+
+  for (let i = 0; i <= bLen; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= aLen; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= bLen; i++) {
+    for (let j = 1; j <= aLen; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        );
+      }
+    }
+  }
+
+  return matrix[bLen][aLen];
+}
+
+// Calculate similarity score (0-1, higher is better)
+function similarityScore(a: string, b: string): number {
+  const distance = levenshteinDistance(a.toLowerCase(), b.toLowerCase());
+  const maxLen = Math.max(a.length, b.length);
+  return maxLen === 0 ? 1 : 1 - distance / maxLen;
+}
+
+export interface FuzzyMatch<T> {
+  item: T;
+  name: string;
+  score: number;
+  matchType: 'exact' | 'alias' | 'fuzzy';
+}
+
 const DEFAULT_REGISTRY_URL = 'https://registry.slyxup.online/registry.json';
 const REGISTRY_URL = process.env.SLYXUP_REGISTRY_URL || DEFAULT_REGISTRY_URL;
 const CACHE_DIR = path.join(os.homedir(), '.slyxup', 'cache');
@@ -25,8 +72,11 @@ export class RegistryLoader {
   async load(forceRefresh = false): Promise<Registry> {
     logger.info('Loading registry', { forceRefresh });
 
-    // Try to load from cache first
-    if (!forceRefresh) {
+    // Check if using local file - skip cache for local files
+    const isLocalFile = REGISTRY_URL.startsWith('file://') || REGISTRY_URL.startsWith('/');
+    
+    // Try to load from cache first (only for remote URLs)
+    if (!forceRefresh && !isLocalFile) {
       const cachedRegistry = await this.loadFromCache();
       if (cachedRegistry) {
         this.registry = cachedRegistry;
@@ -34,9 +84,13 @@ export class RegistryLoader {
       }
     }
 
-    // Fetch from remote
+    // Fetch from remote or local file
     const registry = await this.fetchRegistry();
-    await this.saveToCache(registry);
+    
+    // Only cache remote registries, not local files
+    if (!isLocalFile) {
+      await this.saveToCache(registry);
+    }
 
     this.registry = registry;
     return registry;
@@ -50,6 +104,16 @@ export class RegistryLoader {
       }
 
       const cached = await safeReadJSON<CachedRegistry>(REGISTRY_CACHE_FILE);
+      
+      // Check if cache is for the same URL
+      if (cached.url !== REGISTRY_URL) {
+        logger.debug('Registry cache URL mismatch, ignoring cache', { 
+          cached: cached.url, 
+          current: REGISTRY_URL 
+        });
+        return null;
+      }
+      
       const age = Date.now() - cached.timestamp;
 
       if (age > CACHE_TTL) {
@@ -208,6 +272,125 @@ export class RegistryLoader {
 
     // Return latest version (first in array)
     return features[0];
+  }
+
+  /**
+   * Fuzzy search for features - handles typos like "tailwid" -> "tailwind"
+   */
+  fuzzySearchFeature(query: string, threshold = 0.6): FuzzyMatch<RegistryFeature>[] {
+    if (!this.registry) {
+      throw new RegistryError('Registry not loaded');
+    }
+
+    const normalizedQuery = query.toLowerCase().trim();
+    const matches: FuzzyMatch<RegistryFeature>[] = [];
+
+    for (const [featureName, featureVersions] of Object.entries(this.registry.features)) {
+      const feature = featureVersions[0]; // Latest version
+      
+      // Check exact match
+      if (featureName.toLowerCase() === normalizedQuery) {
+        matches.push({ item: feature, name: featureName, score: 1, matchType: 'exact' });
+        continue;
+      }
+
+      // Check aliases
+      if (feature.aliases) {
+        const aliasMatch = feature.aliases.find(
+          alias => alias.toLowerCase() === normalizedQuery
+        );
+        if (aliasMatch) {
+          matches.push({ item: feature, name: featureName, score: 0.99, matchType: 'alias' });
+          continue;
+        }
+      }
+
+      // Fuzzy match on name
+      const nameScore = similarityScore(featureName, normalizedQuery);
+      if (nameScore >= threshold) {
+        matches.push({ item: feature, name: featureName, score: nameScore, matchType: 'fuzzy' });
+        continue;
+      }
+
+      // Fuzzy match on aliases
+      if (feature.aliases) {
+        for (const alias of feature.aliases) {
+          const aliasScore = similarityScore(alias, normalizedQuery);
+          if (aliasScore >= threshold && aliasScore > nameScore) {
+            matches.push({ item: feature, name: featureName, score: aliasScore, matchType: 'fuzzy' });
+            break;
+          }
+        }
+      }
+    }
+
+    // Sort by score descending
+    return matches.sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * Fuzzy search for templates - handles typos
+   */
+  fuzzySearchTemplate(query: string, threshold = 0.6): FuzzyMatch<RegistryTemplate>[] {
+    if (!this.registry) {
+      throw new RegistryError('Registry not loaded');
+    }
+
+    const normalizedQuery = query.toLowerCase().trim();
+    const matches: FuzzyMatch<RegistryTemplate>[] = [];
+
+    for (const [templateName, templateVersions] of Object.entries(this.registry.templates)) {
+      const template = templateVersions[0]; // Latest version
+      
+      // Check exact match
+      if (templateName.toLowerCase() === normalizedQuery) {
+        matches.push({ item: template, name: templateName, score: 1, matchType: 'exact' });
+        continue;
+      }
+
+      // Check aliases
+      if (template.aliases) {
+        const aliasMatch = template.aliases.find(
+          alias => alias.toLowerCase() === normalizedQuery
+        );
+        if (aliasMatch) {
+          matches.push({ item: template, name: templateName, score: 0.99, matchType: 'alias' });
+          continue;
+        }
+      }
+
+      // Fuzzy match on name
+      const nameScore = similarityScore(templateName, normalizedQuery);
+      if (nameScore >= threshold) {
+        matches.push({ item: template, name: templateName, score: nameScore, matchType: 'fuzzy' });
+        continue;
+      }
+
+      // Fuzzy match on aliases
+      if (template.aliases) {
+        for (const alias of template.aliases) {
+          const aliasScore = similarityScore(alias, normalizedQuery);
+          if (aliasScore >= threshold && aliasScore > nameScore) {
+            matches.push({ item: template, name: templateName, score: aliasScore, matchType: 'fuzzy' });
+            break;
+          }
+        }
+      }
+    }
+
+    // Sort by score descending
+    return matches.sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * Get suggestions for a mistyped feature/template name
+   */
+  getSuggestions(query: string, type: 'feature' | 'template' = 'feature', limit = 3): string[] {
+    const matches = type === 'feature' 
+      ? this.fuzzySearchFeature(query, 0.4)
+      : this.fuzzySearchTemplate(query, 0.4);
+    
+    return matches.slice(0, limit).map(m => m.name);
   }
 
   listTemplates(): RegistryTemplate[] {

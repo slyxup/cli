@@ -14,16 +14,19 @@ import { InstallationError } from '../types/errors.js';
 export interface TemplateInstallOptions {
   framework: string;
   projectName: string;
+  targetDir?: string;
   version?: string;
   verbose?: boolean;
 }
 
 export class TemplateInstaller {
   async install(options: TemplateInstallOptions): Promise<void> {
-    const { framework, projectName, version, verbose } = options;
-    const projectDir = path.resolve(process.cwd(), projectName);
+    const { framework, projectName, targetDir, version, verbose } = options;
+    const projectDir = targetDir || path.resolve(process.cwd(), projectName);
+    const isCurrentDir = targetDir === process.cwd();
 
-    if (await pathExists(projectDir)) {
+    // Only check if directory exists for new directories (not current dir)
+    if (!isCurrentDir && !targetDir && await pathExists(projectDir)) {
       throw new InstallationError(`Directory already exists: ${projectName}`);
     }
 
@@ -73,8 +76,10 @@ export class TemplateInstaller {
 
       spinner.start('Creating project directory...');
       await ensureDir(projectDir);
-      transaction.recordCreateDir(projectDir);
-      spinner.succeed(chalk.green('✓ Project directory created'));
+      if (!isCurrentDir) {
+        transaction.recordCreateDir(projectDir);
+      }
+      spinner.succeed(chalk.green('✓ Project directory ready'));
 
       spinner.start('Extracting template...');
       const extractedFiles = await extractor.extract(archivePath, projectDir);
@@ -113,7 +118,9 @@ export class TemplateInstaller {
 
       console.log();
       console.log(chalk.cyan('Next steps:'));
-      console.log(chalk.gray(`  cd ${projectName}`));
+      if (!isCurrentDir) {
+        console.log(chalk.gray(`  cd ${projectName}`));
+      }
       console.log(chalk.gray('  npm install'));
       console.log(chalk.gray('  npm run dev'));
       console.log();
