@@ -1,11 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import inquirer from 'inquirer';
 import { execSync } from 'child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { readdir } from 'fs/promises';
 import path from 'path';
-import * as ts from 'typescript';
 
 import { templateInstaller } from '../core/template-installer.js';
 import { FeatureInstaller } from '../core/feature-installer.js';
@@ -109,6 +107,7 @@ async function removeTypeScriptFromProject(projectDir: string): Promise<void> {
     const viteConfigJs = path.join(projectDir, 'vite.config.js');
     let content = readFileSync(viteConfigTs, 'utf-8');
     try {
+      const ts = await import('typescript');
       const result = ts.transpileModule(content, {
         compilerOptions: {
           target: ts.ScriptTarget.Latest,
@@ -158,6 +157,7 @@ async function convertTsFilesToJs(dir: string): Promise<void> {
         // Read, convert, and write
         let content = readFileSync(fullPath, 'utf-8');
         try {
+          const ts = await import('typescript');
           const result = ts.transpileModule(content, {
             compilerOptions: {
               target: ts.ScriptTarget.Latest,
@@ -232,6 +232,8 @@ const STATUS_LABELS: Record<string, string> = {
 
 async function interactiveMode(_verbose = false) {
   console.log(chalk.bold.cyan('\n🔧 SlyxUp Interactive Setup\n'));
+
+  const inquirer = (await import('inquirer')).default;
 
   const { framework } = await inquirer.prompt([
     {
@@ -371,6 +373,7 @@ Examples:
 
           // If not from interactive mode and ts option not explicitly set, ask user
           if (!fromInteractive && options.ts === undefined && !options.yes) {
+            const inquirer = (await import('inquirer')).default;
             const { useTypeScript } = await inquirer.prompt([
               {
                 type: 'confirm',
@@ -414,6 +417,7 @@ Examples:
             const hasPackageJson = files.includes('package.json');
             
             if (hasPackageJson) {
+              const inquirer = (await import('inquirer')).default;
               const { overwrite } = await inquirer.prompt([
                 {
                   type: 'confirm',
@@ -485,6 +489,7 @@ Examples:
           console.log();
 
           if (!options?.yes) {
+            const inquirer = (await import('inquirer')).default;
             const { confirm } = await inquirer.prompt([
               {
                 type: 'confirm',
@@ -567,6 +572,7 @@ Examples:
           let installNow = options?.yes ?? false;
           
           if (!options?.yes) {
+            const inquirer = (await import('inquirer')).default;
             const { installChoice } = await inquirer.prompt([
               {
                 type: 'confirm',

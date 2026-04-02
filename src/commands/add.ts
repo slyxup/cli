@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import inquirer from 'inquirer';
+
 import ora from 'ora';
 import { execSync } from 'child_process';
 import fs from 'fs/promises';
@@ -66,6 +66,8 @@ Examples:
     `
     )
     .action(async (features: string[], options?: AddOptions) => {
+      const inquirer = (await import("inquirer")).default;
+      
       try {
         const spinner = ora('Detecting project...').start();
         let project = await detectProject();
@@ -74,6 +76,7 @@ Examples:
           spinner.warn(chalk.yellow('No package.json found'));
           
           // Offer to initialize a new project
+          
           const { initProject } = await inquirer.prompt([
             {
               type: 'confirm',
@@ -95,6 +98,7 @@ Examples:
 
           // Ask for project name
           const currentDirName = path.basename(process.cwd());
+          
           const { projectName } = await inquirer.prompt([
             {
               type: 'input',
@@ -147,6 +151,7 @@ Examples:
         console.log();
 
         if (project.framework === 'unknown') {
+          
           const { proceed } = await inquirer.prompt([
             {
               type: 'confirm',
@@ -216,6 +221,7 @@ Examples:
             console.log();
           }
 
+          
           const { selectedFeatures } = await inquirer.prompt([
             {
               type: 'checkbox',
@@ -271,6 +277,7 @@ Examples:
                 // If it's a very close match (typo), auto-suggest
                 if (bestMatch.score >= 0.8) {
                   console.log(chalk.yellow(`  ⚠ "${featureName}" not found.`));
+                  
                   
                   const { useMatch } = await inquirer.prompt([
                     {
@@ -391,7 +398,8 @@ Examples:
         }
 
         if (!options?.yes) {
-          const { confirm } = await inquirer.prompt([
+          
+              const { confirm } = await inquirer.prompt([
             {
               type: 'confirm',
               name: 'confirm',
@@ -494,6 +502,7 @@ Examples:
           let runInstall = options?.yes ?? false;
           
           if (!options?.yes) {
+            
             const response = await inquirer.prompt([
               {
                 type: 'confirm',

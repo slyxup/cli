@@ -1,4 +1,4 @@
-import fetch from 'node-fetch';
+
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -64,6 +64,7 @@ export class Downloader {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
 
+      const fetch = (await import('node-fetch')).default;
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'SlyxUp-CLI/1.0.0',

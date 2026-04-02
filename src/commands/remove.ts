@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import inquirer from 'inquirer';
+
 import ora from 'ora';
 import fs from 'fs/promises';
 import path from 'path';
@@ -207,7 +207,8 @@ Examples:
         }
 
         if (!options?.yes) {
-          const { confirm } = await inquirer.prompt([
+          const inquirer = (await import("inquirer")).default;
+            const { confirm } = await inquirer.prompt([
             {
               type: 'confirm',
               name: 'confirm',

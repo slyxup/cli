@@ -1,6 +1,6 @@
 {
   "name": "@slyxup/cli",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Production-grade CLI for secure project scaffolding with registry-driven architecture",
   "main": "dist/index.js",
   "type": "module",
@@ -27,7 +27,13 @@
     "template",
     "registry",
     "secure",
-    "framework"
+    "framework",
+    "create-react-app",
+    "vite",
+    "starter",
+    "boilerplate",
+    "generator",
+    "frontend"
   ],
   "author": "SlyxUp Team",
   "license": "MIT",
@@ -37,9 +43,9 @@
     "inquirer": "^9.2.15",
     "node-fetch": "^3.3.2",
     "ora": "^8.0.1",
-    "sucrase": "^3.35.1",
     "tar": "^7.0.1",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "typescript": "^5.0.0"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
@@ -51,8 +57,7 @@
     "eslint": "^8.56.0",
     "jest": "^29.7.0",
     "prettier": "^3.2.5",
-    "ts-jest": "^29.1.2",
-    "typescript": "^5.9.3"
+    "ts-jest": "^29.1.2"
   },
   "engines": {
     "node": ">=18.0.0"
