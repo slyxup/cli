@@ -43,7 +43,7 @@ export function createUpgradeCommand(): Command {
           console.log(chalk.cyan('Checking for SlyxUp CLI updates...'));
           console.log();
           console.log(chalk.gray('To update the CLI, run:'));
-          console.log(chalk.cyan('  npm update -g @slyxup/cli'));
+          console.log(chalk.cyan('  npm update -g slyxup'));
           return;
         }
 

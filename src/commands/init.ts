@@ -436,40 +436,73 @@ Examples:
 
           const templates = registryLoader.listTemplates();
           const templateData = templates.find((t) => t.name === resolvedTemplate);
+          
+          // Check if it's a stack
+          const stack = registryLoader.getStack(resolvedTemplate);
 
-          if (!templateData) {
+          if (!templateData && !stack) {
             console.error(chalk.red(`\n✗ Template not found: ${resolvedTemplate}`));
             console.log();
-            console.log(chalk.bold('Available templates:'));
-            console.log();
-            templates.forEach((t) => {
-              const statusColor = STATUS_COLORS[t.status || 'stable'];
-              const statusLabel = STATUS_LABELS[t.status || 'stable'];
-              const version = t.frameworkVersion || t.version;
-              console.log(`  ${chalk.cyan(t.name)} ${chalk.gray(`(${version})`)} ${statusColor(`[${statusLabel}]`)}`);
-              if (options?.verbose) {
-                console.log(chalk.gray(`    ${t.description}`));
-              }
-            });
+            
+            // Show available templates
+            const templates = registryLoader.listTemplates();
+            const stacks = registryLoader.listStacks();
+            
+            if (templates.length > 0) {
+              console.log(chalk.bold('Available templates:'));
+              console.log();
+              templates.forEach((t) => {
+                const statusColor = STATUS_COLORS[t.status || 'stable'];
+                const statusLabel = STATUS_LABELS[t.status || 'stable'];
+                const version = t.frameworkVersion || t.version;
+                console.log(`  ${chalk.cyan(t.name)} ${chalk.gray(`(${version})`)} ${statusColor(`[${statusLabel}]`)}`);
+              });
+            }
+            
+            if (stacks.length > 0) {
+              console.log();
+              console.log(chalk.bold('Available stacks:'));
+              console.log();
+              stacks.forEach((s) => {
+                const statusColor = STATUS_COLORS[s.status || 'stable'];
+                const statusLabel = STATUS_LABELS[s.status || 'stable'];
+                console.log(`  ${chalk.green(s.name)} ${statusColor(`[${statusLabel}]`)}`);
+                console.log(chalk.gray(`    ${s.description}`));
+              });
+            }
+            
             console.log();
             console.log(chalk.gray('Tip: Run without arguments for interactive mode'));
             process.exit(1);
           }
-
-          const version = templateData.frameworkVersion || templateData.version;
+          
+          // If it's a stack, use its base framework
+          const baseFramework = stack ? stack.framework : resolvedTemplate;
+          const templateDataForStack = stack ? templates.find((t) => t.name === baseFramework) : templateData;
+          const version = templateDataForStack?.frameworkVersion || templateDataForStack?.version || '1.0.0';
 
           if (options?.dryRun) {
             console.log(chalk.bold.cyan('\n🔍 Dry Run - Preview\n'));
             console.log(chalk.bold('Project to create:'));
             console.log(chalk.cyan(`  Name: ${finalProjectName}`));
             console.log(chalk.cyan(`  Template: ${resolvedTemplate} (${version})`));
+            if (stack) {
+              console.log(chalk.cyan(`  Stack: ${stack.name}`));
+              console.log(chalk.gray(`  Features: ${stack.features.join(', ')}`));
+            }
             console.log(chalk.cyan(`  TypeScript: ${options?.ts !== false ? 'Yes' : 'No'}`));
             console.log(chalk.cyan(`  Git init: ${options?.git !== false ? 'Yes' : 'No'}`));
             console.log(chalk.cyan(`  Install deps: ${options?.install ? 'Yes' : 'No'}`));
             console.log();
-            if (templateData.features?.length) {
+            if (stack?.features?.length) {
+              console.log(chalk.bold('Stack features to install:'));
+              stack.features.forEach((f: string) => {
+                console.log(chalk.gray(`  + ${f}`));
+              });
+              console.log();
+            } else if (templateDataForStack?.features?.length) {
               console.log(chalk.bold('Features to install:'));
-              templateData.features.forEach(f => {
+              templateDataForStack.features.forEach(f => {
                 console.log(chalk.gray(`  + ${f}`));
               });
               console.log();
@@ -484,7 +517,12 @@ Examples:
           console.log();
           console.log(chalk.cyan('  Project:   ') + chalk.white(displayName));
           console.log(chalk.cyan('  Directory: ') + chalk.white(isCurrentDir ? '.' : finalProjectName));
-          console.log(chalk.cyan('  Template:  ') + chalk.white(`${resolvedTemplate} (${version})`));
+          if (stack) {
+            console.log(chalk.cyan('  Stack:     ') + chalk.white(stack.name));
+            console.log(chalk.cyan('  Framework: ') + chalk.white(`${baseFramework} (${version})`));
+          } else {
+            console.log(chalk.cyan('  Template:  ') + chalk.white(`${resolvedTemplate} (${version})`));
+          }
           console.log(chalk.cyan('  TypeScript:') + chalk.white(options?.ts !== false ? 'Yes' : 'No'));
           console.log();
 
@@ -506,7 +544,7 @@ Examples:
           }
 
           await templateInstaller.install({
-            framework: resolvedTemplate,
+            framework: baseFramework,
             projectName: displayName,
             targetDir: targetDir,
             version: options?.version,
@@ -543,6 +581,30 @@ Examples:
               console.log(chalk.yellow('⚠ TypeScript setup skipped (may already be configured)'));
               if (options?.verbose && tsError instanceof Error) {
                 console.log(chalk.gray(`  ${tsError.message}`));
+              }
+            }
+          }
+          
+          // If it's a stack, install all features from the stack
+          if (stack && stack.features && stack.features.length > 0) {
+            console.log(chalk.gray('\nInstalling stack features...'));
+            const featureInstaller = new FeatureInstaller();
+            
+            for (const featureName of stack.features) {
+              try {
+                await featureInstaller.install({
+                  featureName,
+                  projectRoot: targetDir,
+                  skipNpmInstall: true,
+                  framework: stack.framework,
+                  verbose: options?.verbose,
+                });
+                console.log(chalk.green(`  ✓ ${featureName}`));
+              } catch (featureError) {
+                console.log(chalk.yellow(`  ⚠ ${featureName} skipped`));
+                if (options?.verbose && featureError instanceof Error) {
+                  console.log(chalk.gray(`    ${featureError.message}`));
+                }
               }
             }
           }

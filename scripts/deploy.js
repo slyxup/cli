@@ -213,7 +213,7 @@ function linkLocal() {
   logStep('LINK', 'Linking CLI globally for local testing...');
   
   // Unlink first if already linked
-  runCommand('npm unlink -g @slyxup/cli', { ignoreError: true, silent: true });
+  runCommand('npm unlink -g slyxup', { ignoreError: true, silent: true });
   
   // Link the package
   runCommand('npm link');
@@ -225,7 +225,7 @@ function linkLocal() {
 // Unlink local
 function unlinkLocal() {
   logStep('UNLINK', 'Unlinking CLI from global...');
-  runCommand('npm unlink -g @slyxup/cli', { ignoreError: true });
+  runCommand('npm unlink -g slyxup', { ignoreError: true });
   logSuccess('CLI unlinked');
 }
 
@@ -329,7 +329,7 @@ async function publishNpm(dryRun = false) {
   runCommand(cmd);
   
   if (!dryRun) {
-    logSuccess(`Published @slyxup/cli@${pkg.version} to npm`);
+    logSuccess(`Published slyxup@${pkg.version} to npm`);
   }
   
   return true;
@@ -424,7 +424,7 @@ ${colors.bright}Test commands:${colors.reset}
   slyxup add tailwind
 
 ${colors.bright}To cleanup:${colors.reset}
-  npm unlink -g @slyxup/cli
+  npm unlink -g slyxup
   unset SLYXUP_REGISTRY_URL
 `);
 }
@@ -465,14 +465,14 @@ async function runProductionDeploy() {
     console.log(`
 ${colors.green}═══ Production Deployment Complete ═══${colors.reset}
 
-${colors.bright}Published:${colors.reset} @slyxup/cli@${getPackageJson().version}
+${colors.bright}Published:${colors.reset} slyxup@${getPackageJson().version}
 
 ${colors.bright}Verify:${colors.reset}
-  npm view @slyxup/cli
-  npm info @slyxup/cli version
+  npm view slyxup
+  npm info slyxup version
 
 ${colors.bright}Users can install with:${colors.reset}
-  npm install -g @slyxup/cli
+  npm install -g slyxup
 `);
   } else {
     log('Publish cancelled.', 'gray');

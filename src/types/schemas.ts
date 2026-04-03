@@ -37,10 +37,25 @@ export const RegistryFeatureSchema = z.object({
   size: z.number().optional(),
 });
 
+export const RegistryStackSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  framework: z.string(),
+  version: z.string(),
+  status: z.enum(['stable', 'beta', 'coming-soon']).optional().default('stable'),
+  features: z.array(z.string()),
+  downloadUrl: z.string(),
+  sha256: z.string().length(64),
+  size: z.number().optional(),
+  aliases: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+});
+
 export const RegistrySchema = z.object({
   version: z.string(),
   templates: z.record(z.array(RegistryTemplateSchema)),
   features: z.record(z.array(RegistryFeatureSchema)),
+  stacks: z.record(RegistryStackSchema).optional(),
 });
 
 // ============================================================================
@@ -294,6 +309,7 @@ export const FeatureResolutionSchema = z.object({
 // Type Exports
 // ============================================================================
 
+export type RegistryStack = z.infer<typeof RegistryStackSchema>;
 export type RegistryTemplate = z.infer<typeof RegistryTemplateSchema>;
 export type RegistryFeature = z.infer<typeof RegistryFeatureSchema>;
 export type Registry = z.infer<typeof RegistrySchema>;

@@ -28,13 +28,13 @@ SlyxUp CLI is a **secure, registry-driven project scaffolding tool** designed wi
 ## Installation
 
 ```bash
-npm install -g @slyxup/cli
+npm install -g slyxup
 ```
 
 Or use with npx (no installation required):
 
 ```bash
-npx @slyxup/cli init react my-app
+npx slyxup init react my-app
 ```
 
 ## Quick Start

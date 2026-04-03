@@ -190,7 +190,7 @@ rm -rf ~/.slyxup/cache
 
 Before publishing to npm, unlink the local version:
 ```bash
-npm unlink -g @slyxup/cli
+npm unlink -g slyxup
 ```
 
 ## Testing with Different Projects
@@ -223,7 +223,7 @@ slyxup add prisma trpc
 
 ```bash
 # 1. Unlink CLI
-npm unlink -g @slyxup/cli
+npm unlink -g slyxup
 
 # 2. Clean cache
 rm -rf ~/.slyxup

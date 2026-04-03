@@ -2,7 +2,7 @@ import fetch from 'node-fetch';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { Registry, RegistrySchema, RegistryTemplate, RegistryFeature } from '../types/schemas.js';
+import { Registry, RegistrySchema, RegistryTemplate, RegistryFeature, RegistryStack } from '../types/schemas.js';
 import { RegistryError, ValidationError } from '../types/errors.js';
 import { logger } from '../utils/logger.js';
 import { ensureDir, pathExists, safeReadJSON, safeWriteJSON } from '../utils/file.js';
@@ -407,6 +407,25 @@ export class RegistryLoader {
     }
 
     return Object.values(this.registry.features).map((features) => features[0]);
+  }
+
+  listStacks(): RegistryStack[] {
+    if (!this.registry) {
+      throw new RegistryError('Registry not loaded');
+    }
+
+    if (!this.registry.stacks) {
+      return [];
+    }
+
+    return Object.values(this.registry.stacks);
+  }
+
+  getStack(name: string): RegistryStack | null {
+    if (!this.registry || !this.registry.stacks) {
+      return null;
+    }
+    return this.registry.stacks[name] || null;
   }
 
   getRegistry(): Registry {
